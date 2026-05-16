@@ -1,81 +1,79 @@
-# Chatbot de Atendimento ao Segurado InsurCode (RAG)
+# Chatbot de Atendimento ao Segurado InsurCode (RAG & Human-in-the-Loop)
 
-Este é um assistente virtual inteligente baseado em IA para automatizar o atendimento de segurados da **InsurCode Seguros**. Utiliza uma arquitetura RAG (Retrieval-Augmented Generation) para garantir respostas precisas baseadas em bases de conhecimento oficiais, combinando curadoria humana com a potência de modelos de linguagem de larga escala.
+Este é um assistente virtual inteligente de nova geração para a **InsurCode Seguros**. Além do motor RAG (Retrieval-Augmented Generation) para respostas automáticas, o sistema integra agora uma arquitetura robusta de **Escalação para Revisão Humana**, um **Módulo de Gestão de Segurados** e uma interface premium de alta performance.
 
-## 🌟 Funcionalidades Principais
+## 🌟 Funcionalidades Principais (v2.2)
 
-### Interface do Segurado
-- **Motor RAG Híbrido**: Combina busca semântica eficiente (TF-IDF) com o raciocínio avançado do modelo **Gemini 2.0 Flash**.
-- **Contextualização Dinâmica**: O bot ajusta a sua personalidade e saudação com base nos datasets ativos (Auto, Saúde, Casa, etc.).
-- **Histórico Persistente**: Conversas guardadas em SQLite, permitindo que o utilizador retome o diálogo onde parou.
-- **Análise de Sentimento**: Monitorização em tempo real do estado emocional do utilizador para respostas mais empáticas.
+### 🤖 Interface do Segurado (Experiência Inteligente)
+- **Identificação por ID ou Nome**: Fluxo conversacional inteligente. Se o utilizador inserir um ID (ex: 101), o sistema resolve automaticamente o nome do segurado e carrega o histórico correspondente.
+- **Recuperação Inteligente de Histórico**: O bot deteta conversas anteriores e permite a continuidade fluida do atendimento.
+- **Follow-up de Pendentes**: Identificação proativa de dúvidas não resolvidas na última sessão.
+- **Escalação Proativa e Híbrida**:
+    - **Flags de Dataset**: Marcadores para intervenção humana em temas sensíveis.
+    - **Análise de In-Scope**: IA deteta se a dúvida é sobre seguros e encaminha para técnicos se não houver resposta na base.
+- **Serviços Rápidos (Sidebar)**: Atalhos para "Participar Sinistro", "2ª Via de Apólice", etc., visíveis apenas para utilizadores identificados.
+- **Layout Adaptativo**: Interface expansível para maior conforto visual.
 
-### Painel Administrativo (WebAdmin)
-- **Dashboards de Analítica**: Visualização de métricas de utilização, taxa de sucesso RAG, tempo médio de resposta e distribuição de sentimentos através de gráficos interativos (Plotly).
-- **Gestão de Conhecimento (CMS)**: 
-    - Interface para adicionar, editar ou remover FAQs manualmente.
-    - Upload de novos datasets em CSV.
-    - Ativação/desativação dinâmica de fontes de dados sem necessidade de reiniciar o sistema.
-- **Curadoria de IA**: Identificação automática de perguntas que o bot não soube responder, permitindo a criação imediata de novas soluções oficiais.
-- **Auditoria & Segurança**: Registo completo de todas as ações administrativas e proteção de acesso via SHA256.
+### 🛡️ Painel Administrativo (Gestão Centralizada)
+- **👤 Gestão de Segurados (Novo)**:
+    - Interface CRUD completa para gerir a base de clientes (ID, Nome, Email, Contacto).
+    - Pesquisa rápida e filtros para administração ágil.
+- **📝 CMS de FAQs**: Gestão dinâmica de datasets e ativação/desativação de ficheiros em tempo real.
+- **📜 Auditoria e Segurança**:
+    - **Login Persistente**: Autenticação mantida durante a navegação entre tabs.
+    - **Logout Seguro**: Botão "Sair do Painel" com redirecionamento programático e limpeza de estado.
+    - **Audit Log**: Registo detalhado de todas as ações administrativas.
+- **🔧 Revisão Humana (Tickets)**: Sistema de tickets com filtros por data, utilizador e categoria para escalação técnica.
+- **📊 Analítica Visual**: Dashboards responsivos (Plotly) para monitorização de sentimento, performance da IA e volume de tráfego.
 
-## 🏗️ Arquitetura Técnica
+## 🏗️ Arquitetura Técnica Avançada
 
-O sistema funciona num fluxo de 4 passos principais:
-1.  **Recuperação (Retrieval)**: Quando o utilizador faz uma pergunta, o motor TF-IDF procura a FAQ mais relevante nos datasets ativos.
-2.  **Aumentação (Augmentation)**: Se uma FAQ é encontrada, ela é injetada como contexto no prompt da IA.
-3.  **Geração (Generation)**: O modelo **Gemini 2.0 Flash** (via OpenRouter) gera uma resposta conversacional e empática baseada na informação oficial.
-4.  **Monitorização**: O sistema regista a performance, o sentimento e o tempo de execução para melhoria contínua.
+O sistema opera como uma máquina de estados robusta:
+1.  **Camada de Identificação**: Resolução de ID -> Nome e orquestração de histórico persistente.
+2.  **Motor RAG Semântico**: Recuperação TF-IDF otimizada integrada com **Gemini 2.0 Flash**.
+3.  **Pipeline de Confiança**: Avaliação multicritério (RAG Score + NLP Intent) para decidir entre IA ou Humano.
+4.  **UX Responsiva (Wide Mode)**: Interface configurada em modo expandido para maximizar a densidade de informação em ecrãs empresariais.
 
 ## 🛠️ Tecnologias Utilizadas
 
-- **Interface**: [Streamlit](https://streamlit.io/)
-- **IA/LLM**: [OpenRouter](https://openrouter.ai/) (Google Gemini 2.0 Flash 001)
-- **Processamento de Dados**: Pandas, Scikit-Learn
-- **Base de Dados**: SQLite3 (Persistência, Analítica e Auditoria)
-- **Visualização**: Plotly Express
-- **Segurança**: Hashlib (SHA256) e Dotenv para gestão de segredos.
+- **Frontend**: [Streamlit](https://streamlit.io/) (Layout Wide & Responsive Parameters)
+- **Motor de IA**: [OpenRouter](https://openrouter.ai/) (Google Gemini 2.0 Flash 001)
+- **Processamento de Dados**: Scikit-Learn (TF-IDF), Pandas, NumPy
+- **Persistência**: SQLite3 (Schema dinâmico com suporte a Segurados e Tickets)
+- **Estilo**: CSS Vanilla para micro-animações e badges de estado (ex: Shield de Segurado 🛡️)
 
 ## ⚙️ Configuração e Instalação
 
 ### Pré-requisitos
-- Python 3.8 ou superior.
-- Chave de API da [OpenRouter](https://openrouter.ai/).
+- Python 3.9+
+- `.env` com `OPENROUTER_API_KEY`
 
-### Passos
-1. **Clonar e Instalar**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. **Configurar Variáveis**:
-   Crie um ficheiro `.env` na raiz com:
-   ```env
-   OPENROUTER_API_KEY=sua_chave_aqui
-   OPENROUTER_MODEL=google/gemini-2.0-flash-001
-   ```
-3. **Iniciar**:
-   ```bash
-   streamlit run app.py
-   ```
+### Instalação
+```bash
+# Criar ambiente virtual
+python -m venv venv
+source venv/bin/activate  # venv\Scripts\activate no Windows
 
-## 🛡️ Acesso Administrativo
-O acesso ao painel admin é feito através da barra lateral.
-- **Utilizador**: `admin`
-- **Senha Padrão**: `admin123` *(Pode ser alterada via código ou DB)*.
+# Instalar dependências
+pip install -r requirements.txt
 
-## 📈 Estado do Projeto e Roadmap
+# Iniciar aplicação
+streamlit run app.py
+```
 
-### ✅ Fases Concluídas
-- [x] **Fase 1-3**: Setup, Motor RAG Base e Interface de Chat.
-- [x] **Fase 4-5**: Persistência de Histórico e Gestão Multi-utilizador.
-- [x] **Fase 6-7**: Painel Admin, Dashboards e CMS de FAQs.
-- [x] **Fase 8**: Curadoria de Falhas de IA e Auditoria de Segurança.
+## 📈 Roadmap (2024-2025)
 
-### 🚀 Próximos Passos (Roadmap 2024-2025)
-- **Inteligência**: Migração para Vector DB (ChromaDB) para busca semântica profunda.
-- **UX**: Integração de Voz (STT/TTS) e Leitura de PDFs de apólices individuais.
-- **Automação**: Conectores com APIs de sistemas core para consulta de sinistros em tempo real.
-- **Segurança**: Mascaramento automático de dados de PII (RGPD Compliance).
+### ✅ Concluído
+- [x] Módulo de **Gestão de Segurados** (CRUD e Identificação por ID).
+- [x] **Layout Wide** e interface profissional adaptativa.
+- [x] Sistema de **Logout e Autenticação Persistente** no Admin.
+- [x] Escalação Iterativa e Painel de Tickets avançado.
+- [x] Integração total com OpenRouter/Gemini.
+
+### 🚀 Próximos Desafios
+- **Análise Multimodal**: Processamento de imagens de sinistros via IA vision.
+- **Geolocalização**: Assistência rodoviária em tempo real baseada no GPS do segurado.
+- **Conectividade Core**: Integração via API com sistemas de apólices externos.
 
 ---
-*Desenvolvido por Antigravity para a Equipa de Inovação InsurCode.*
+*Documentação oficial da plataforma InsurCode v2.2. Desenvolvido por Antigravity.*

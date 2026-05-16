@@ -1,4 +1,4 @@
-import pandas as pd
+﻿import pandas as pd
 import numpy as np
 import re
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -24,9 +24,8 @@ def load_faq_data(file_path):
 
 def build_retriever(df):
     """Cria o motor de recuperação baseado em TF-IDF."""
-    # Combinamos pergunta e tags para melhor contexto
-    df['text_for_retrieval'] = df['pergunta'] + " " + df['tags'].fillna('')
-    vectorizer = TfidfVectorizer(stop_words='english') # No nosso caso PT seria melhor, mas para 200 linhas 'english' ou None funciona.
+    df['text_for_retrieval'] = df['pergunta'].astype(str) + " " + df['tags'].fillna('').astype(str)
+    vectorizer = TfidfVectorizer(stop_words='english')
     tfidf_matrix = vectorizer.fit_transform(df['text_for_retrieval'])
     return vectorizer, tfidf_matrix
 
@@ -35,39 +34,38 @@ def find_best_faq_rag(query, df, vectorizer, tfidf_matrix):
     query_vec = vectorizer.transform([query])
     cosine_similarities = cosine_similarity(query_vec, tfidf_matrix).flatten()
     best_idx = cosine_similarities.argsort()[-1]
-    
     score = cosine_similarities[best_idx]
     
-    if score > 0.2: # Threshold para relevância
+    if score > 0.2:
         row = df.iloc[best_idx]
         return {
             'pergunta': row['pergunta'],
             'resposta': row['resposta'],
             'categoria': row['categoria'],
+            'requer_revisao_humana': row.get('requer_revisao_humana', 'Não'),
+            'motivo_revisao': row.get('motivo_revisao', ''),
             'score': float(score)
         }
     return None
 
-def get_ai_response(user_query, faq_match=None):
+def get_ai_response(user_query, faq_match=None, user_name=None):
     """Gera uma resposta amigável usando OpenRouter."""
-    
     model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
-    
-    # Deteta os domínios ativos para ajustar o tom
     active_df = load_active_datasets()
     dominios = ", ".join(active_df['categoria'].unique()) if not active_df.empty else "seguros"
+    addressing = f", tratando o utilizador como {user_name}" if user_name else ""
     
     system_prompt = (
         f"És um assistente virtual especializado da seguradora InsurCode. "
         f"Atualmente tens conhecimento sobre: {dominios}. "
-        "O teu objetivo é ajudar o segurado de forma profissional, clara e empática. "
+        f"O teu objetivo é ajudar o segurado de forma profissional, clara e empática{addressing}. "
         "Se for fornecida uma resposta de FAQ, deves usá-la como base, mas podes torná-la mais conversacional. "
         "Responde sempre de acordo com o domínio da pergunta do cliente."
     )
     
     context = ""
     if faq_match:
-        context = f"\nInformação correta da FAQ para esta dúvida:\nPergunta: {faq_match['pergunta']}\nResposta: {faq_match['resposta']}"
+        context = f"\\nInformação correta da FAQ para esta dúvida:\\nPergunta: {faq_match['pergunta']}\\nResposta: {faq_match['resposta']}"
     
     messages = [
         {"role": "system", "content": system_prompt},
@@ -87,10 +85,10 @@ def init_db():
     """Inicializa a base de dados SQLite para o histórico e analítica."""
     conn = sqlite3.connect('chat_history.db')
     c = conn.cursor()
+    
     # Tabela de Mensagens
     c.execute("PRAGMA table_info(messages)")
     columns = [row[1] for row in c.fetchall()]
-    
     if not columns:
         c.execute('''CREATE TABLE messages
                      (id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -104,7 +102,6 @@ def init_db():
     # Tabela de Analítica
     c.execute("PRAGMA table_info(analytics)")
     ana_cols = [row[1] for row in c.fetchall()]
-    
     if not ana_cols:
         c.execute('''CREATE TABLE analytics
                      (id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,7 +129,6 @@ def init_db():
                   password_hash TEXT,
                   role TEXT)''')
     
-    # Criar admin padrão se não existir
     c.execute("SELECT COUNT(*) FROM admins")
     if c.fetchone()[0] == 0:
         default_hash = hashlib.sha256("admin123".encode()).hexdigest()
@@ -147,13 +143,47 @@ def init_db():
                   timestamp DATETIME)''')
                   
     # Tabela de FAQs (CMS)
-    c.execute('''CREATE TABLE IF NOT EXISTS faqs
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  categoria TEXT,
-                  pergunta TEXT,
-                  resposta TEXT,
-                  tags TEXT,
-                  source_file TEXT,
+    c.execute("PRAGMA table_info(faqs)")
+    faq_cols = [row[1] for row in c.fetchall()]
+    if not faq_cols:
+        c.execute('''CREATE TABLE faqs
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      categoria TEXT,
+                      pergunta TEXT,
+                      resposta TEXT,
+                      tags TEXT,
+                      source_file TEXT,
+                      requer_revisao_humana TEXT DEFAULT 'Não',
+                      motivo_revisao TEXT,
+                      timestamp DATETIME)''')
+    else:
+        if 'requer_revisao_humana' not in faq_cols:
+            c.execute("ALTER TABLE faqs ADD COLUMN requer_revisao_humana TEXT DEFAULT 'Não'")
+        if 'motivo_revisao' not in faq_cols:
+            c.execute("ALTER TABLE faqs ADD COLUMN motivo_revisao TEXT")
+                  
+    # Tabela de Tickets (Revisão Humana)
+    c.execute("PRAGMA table_info(tickets)")
+    ticket_cols = [row[1] for row in c.fetchall()]
+    if not ticket_cols:
+        c.execute('''CREATE TABLE tickets
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      user_id TEXT,
+                      original_query TEXT,
+                      details TEXT,
+                      categoria TEXT,
+                      status TEXT DEFAULT 'Pendente',
+                      timestamp DATETIME)''')
+    else:
+        if 'categoria' not in ticket_cols:
+            c.execute("ALTER TABLE tickets ADD COLUMN categoria TEXT")
+                  
+    # Tabela de Segurados
+    c.execute('''CREATE TABLE IF NOT EXISTS segurados
+                 (id TEXT PRIMARY KEY,
+                  nome TEXT,
+                  email TEXT,
+                  contacto TEXT,
                   timestamp DATETIME)''')
                   
     conn.commit()
@@ -187,17 +217,17 @@ def get_audit_logs():
 
 def import_csv_to_db(file_path, filename):
     """Importa um CSV para a tabela de FAQs se ainda não estiver lá."""
-    df = pd.read_csv(file_path, sep=';')
+    with open(file_path, 'r', encoding='utf-8') as f:
+        first_line = f.readline()
+        separator = ';' if ';' in first_line else ','
+    df = pd.read_csv(file_path, sep=separator)
     conn = sqlite3.connect('chat_history.db')
     c = conn.cursor()
-    
-    # Verifica se já importamos este ficheiro para evitar duplicação em massa
-    c.execute("SELECT COUNT(*) FROM faqs WHERE source_file = ?", (filename,))
-    if c.fetchone()[0] == 0:
-        for _, row in df.iterrows():
-            c.execute("INSERT INTO faqs (categoria, pergunta, resposta, tags, source_file, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
-                      (row['categoria'], row['pergunta'], row['resposta'], row.get('tags', ''), filename, datetime.now()))
-    
+    c.execute("DELETE FROM faqs WHERE source_file = ?", (filename,))
+    for _, row in df.iterrows():
+        rev_val = row.get('requer_revisao_humana', 'Não')
+        c.execute("INSERT INTO faqs (categoria, pergunta, resposta, tags, source_file, requer_revisao_humana, motivo_revisao, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                  (row['categoria'], row['pergunta'], row['resposta'], row.get('tags', ''), filename, rev_val, row.get('motivo_revisao', ''), datetime.now()))
     conn.commit()
     conn.close()
 
@@ -236,19 +266,15 @@ def add_custom_faq(categoria, pergunta, resposta, tags):
 
 def sync_datasets():
     """Sincroniza os ficheiros na pasta data com a base de dados."""
+    if not os.path.exists("data"): os.makedirs("data")
     data_files = [f for f in os.listdir("data") if f.endswith(".csv")]
     conn = sqlite3.connect('chat_history.db')
     c = conn.cursor()
-    
-    # Adicionar novos ficheiros se não existirem no DB
     for f in data_files:
         c.execute("INSERT OR IGNORE INTO datasets (filename, is_active) VALUES (?, ?)", (f, 0))
-    
-    # Marcar pelo menos um como ativo por defeito se todos estiverem inativos
     c.execute("SELECT COUNT(*) FROM datasets WHERE is_active = 1")
     if c.fetchone()[0] == 0 and data_files:
         c.execute("UPDATE datasets SET is_active = 1 WHERE filename = ?", (data_files[0],))
-        
     conn.commit()
     conn.close()
 
@@ -272,36 +298,26 @@ def load_active_datasets():
     """Sincroniza ficheiros ativos e carrega as FAQs da base de dados."""
     config = get_datasets_config()
     active_files = config[config['is_active'] == 1]['filename'].tolist()
-    
-    # Importar novos dados dos CSVs ativos para o DB se necessário
     for f in active_files:
         path = os.path.join("data", f)
         if os.path.exists(path):
             import_csv_to_db(path, f)
-    
-    # Carregar do DB (Filtrando apenas as que pertencem a ficheiros ativos OU manuais)
     conn = sqlite3.connect('chat_history.db')
-    query = f"SELECT categoria, pergunta, resposta, tags, source_file FROM faqs WHERE source_file IN ({','.join(['?']*len(active_files))} , 'manual_cms')"
-    df = pd.read_sql_query(query, conn, params=active_files)
+    if active_files:
+        query = f"SELECT categoria, pergunta, resposta, tags, source_file, requer_revisao_humana, motivo_revisao FROM faqs WHERE source_file IN ({','.join(['?']*len(active_files))} , 'manual_cms')"
+        df = pd.read_sql_query(query, conn, params=active_files)
+    else:
+        df = pd.read_sql_query("SELECT categoria, pergunta, resposta, tags, source_file, requer_revisao_humana, motivo_revisao FROM faqs WHERE source_file = 'manual_cms'", conn)
     conn.close()
-    
-    if df.empty:
-        return pd.DataFrame(columns=['categoria', 'pergunta', 'resposta', 'tags'])
-        
-    # Deduplicação
-    def normalize_text(text):
-        if not isinstance(text, str): return ""
-        return re.sub(r'[^\w\s]', '', text.lower().strip())
-
-    df['normalized_pergunta'] = df['pergunta'].apply(normalize_text)
+    if df.empty: return pd.DataFrame(columns=['categoria', 'pergunta', 'resposta', 'tags'])
+    df['normalized_pergunta'] = df['pergunta'].astype(str).str.lower().str.strip()
+    df = df.sort_values(by='requer_revisao_humana', ascending=False)
     deduplicated_df = df.drop_duplicates(subset=['normalized_pergunta'], keep='first')
-    
     return deduplicated_df.drop(columns=['normalized_pergunta'])
 
 def get_missed_questions():
-    """Recupera perguntas onde o RAG teve score baixo (falhas)."""
+    """Recupera perguntas onde o RAG teve score baixo."""
     conn = sqlite3.connect('chat_history.db')
-    # Consideramos falha qualquer score < 0.2
     df = pd.read_sql_query("SELECT * FROM analytics WHERE faq_score < 0.2 ORDER BY timestamp DESC", conn)
     conn.close()
     return df
@@ -321,19 +337,16 @@ def analyze_sentiment(text):
     """Analisa o sentimento da mensagem usando a IA."""
     model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
     prompt = f"Analisa o sentimento desta mensagem de um cliente de seguros e responde APENAS com uma destas palavras: [Positivo, Neutro, Negativo, Irritado]. Mensagem: '{text}'"
-    
     try:
         response = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}]
         )
         sentiment = response.choices[0].message.content.strip()
-        # Garantir que retorna apenas uma das palavras
         for s in ["Positivo", "Neutro", "Negativo", "Irritado"]:
             if s in sentiment: return s
         return "Neutro"
-    except:
-        return "Neutro"
+    except: return "Neutro"
 
 def get_analytics_data():
     """Recupera dados para o dashboard."""
@@ -344,7 +357,7 @@ def get_analytics_data():
     return df_analytics, df_messages
 
 def save_message(user_id, role, content):
-    """Guarda uma mensagem na base de dados para um utilizador específico."""
+    """Guarda uma mensagem na base de dados."""
     conn = sqlite3.connect('chat_history.db')
     c = conn.cursor()
     c.execute("INSERT INTO messages (user_id, role, content, timestamp) VALUES (?, ?, ?, ?)", 
@@ -353,7 +366,7 @@ def save_message(user_id, role, content):
     conn.close()
 
 def get_chat_history(user_id):
-    """Recupera o histórico de mensagens de um utilizador específico."""
+    """Recupera o histórico de mensagens."""
     conn = sqlite3.connect('chat_history.db')
     c = conn.cursor()
     c.execute("SELECT role, content FROM messages WHERE user_id = ? ORDER BY timestamp ASC", (user_id,))
@@ -362,9 +375,108 @@ def get_chat_history(user_id):
     return history
 
 def delete_chat_history(user_id):
-    """Limpa o histórico de mensagens de um utilizador específico."""
+    """Limpa o histórico de mensagens."""
     conn = sqlite3.connect('chat_history.db')
     c = conn.cursor()
     c.execute("DELETE FROM messages WHERE user_id = ?", (user_id,))
     conn.commit()
     conn.close()
+
+def register_ticket(user_id, query, details, categoria="Geral"):
+    """Regista um pedido de revisão humana."""
+    conn = sqlite3.connect('chat_history.db')
+    c = conn.cursor()
+    c.execute("INSERT INTO tickets (user_id, original_query, details, categoria, timestamp) VALUES (?, ?, ?, ?, ?)",
+              (user_id, query, details, categoria, datetime.now()))
+    conn.commit()
+    conn.close()
+
+def get_tickets():
+    """Recupera todos os pedidos de revisão humana."""
+    conn = sqlite3.connect('chat_history.db')
+    df = pd.read_sql_query("SELECT * FROM tickets ORDER BY timestamp DESC", conn)
+    conn.close()
+    return df
+
+def update_ticket_status(ticket_id, new_status):
+    """Atualiza o estado de um ticket."""
+    conn = sqlite3.connect('chat_history.db')
+    c = conn.cursor()
+    c.execute("UPDATE tickets SET status = ? WHERE id = ?", (new_status, ticket_id))
+    conn.commit()
+    conn.close()
+
+def check_unresolved_issues(user_id):
+    """Verifica se as últimas interações do utilizador tiveram score baixo."""
+    conn = sqlite3.connect('chat_history.db')
+    c = conn.cursor()
+    c.execute("SELECT query, faq_score FROM analytics WHERE user_id = ? ORDER BY timestamp DESC LIMIT 3", (user_id,))
+    results = c.fetchall()
+    conn.close()
+    unresolved = [r[0] for r in results if r[1] < 0.2]
+    return unresolved[0] if unresolved else None
+
+def is_insurance_related(query):
+    """Verifica se a pergunta está relacionada com o domínio de seguros."""
+    model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
+    prompt = (
+        f"Analisa se a seguinte pergunta de um utilizador está relacionada com o mundo dos seguros "
+        f"(automóvel, saúde, vida, etc.) ou com a seguradora InsurCode. "
+        f"Responde APENAS com 'Sim' ou 'Não'.\\n\\nPergunta: '{query}'"
+    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        result = response.choices[0].message.content.strip().lower()
+        return "sim" in result
+    except: return False
+
+def get_segurados():
+    """Recupera todos os segurados registados."""
+    conn = sqlite3.connect('chat_history.db')
+    df = pd.read_sql_query("SELECT id, nome, email, contacto FROM segurados ORDER BY nome", conn)
+    conn.close()
+    return df
+
+def add_segurado(sid, nome, email, contacto):
+    """Adiciona um novo segurado."""
+    conn = sqlite3.connect('chat_history.db')
+    c = conn.cursor()
+    try:
+        c.execute("INSERT INTO segurados (id, nome, email, contacto, timestamp) VALUES (?, ?, ?, ?, ?)",
+                  (sid, nome, email, contacto, datetime.now()))
+        conn.commit()
+        success = True
+    except sqlite3.IntegrityError:
+        success = False
+    conn.close()
+    return success
+
+def update_segurado(sid, nome, email, contacto):
+    """Atualiza dados de um segurado."""
+    conn = sqlite3.connect('chat_history.db')
+    c = conn.cursor()
+    c.execute("UPDATE segurados SET nome = ?, email = ?, contacto = ? WHERE id = ?",
+              (nome, email, contacto, sid))
+    conn.commit()
+    conn.close()
+
+def delete_segurado(sid):
+    """Remove um segurado."""
+    conn = sqlite3.connect('chat_history.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM segurados WHERE id = ?", (sid,))
+    conn.commit()
+    conn.close()
+
+def find_segurado_by_id(sid):
+    """Procura um segurado pelo seu ID ou Nome exato."""
+    conn = sqlite3.connect('chat_history.db')
+    c = conn.cursor()
+    c.execute("SELECT id, nome FROM segurados WHERE id = ? OR LOWER(nome) = ?", (sid, sid.lower()))
+    res = c.fetchone()
+    conn.close()
+    if res: return {'id': res[0], 'nome': res[1]}
+    return None
